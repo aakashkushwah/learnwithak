@@ -1,0 +1,678 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Reverse Proxy — Live</title>
+<style>
+  :root {
+    --bg: #0d1017;
+    --panel: #151a24;
+    --panel-2: #1b2130;
+    --line: #262e3d;
+    --text: #e8ecf5;
+    --muted: #8b95ab;
+    --proxy: #7c8cff;
+    --client: #e0a75e;
+    --ok: #3fcf8e;
+    --warn: #e9b949;
+    --bad: #f2695f;
+    --cache: #4ec9e8;
+    --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font-family: var(--sans); font-size: 15px; -webkit-font-smoothing: antialiased;
+    display: flex; flex-direction: column;
+  }
+
+  /* ---------- header ---------- */
+  header {
+    display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+    padding: 14px 22px; border-bottom: 1px solid var(--line); background: var(--panel);
+  }
+  header h1 { font-size: 17px; margin: 0; font-weight: 650; letter-spacing: -.01em; }
+  header .sub { color: var(--muted); font-size: 13px; }
+  .live {
+    display: flex; align-items: center; gap: 7px; margin-left: auto;
+    font-family: var(--mono); font-size: 12px; color: var(--muted);
+  }
+  .live .pulse {
+    width: 8px; height: 8px; border-radius: 50%; background: var(--ok);
+    box-shadow: 0 0 0 0 rgba(63,207,142,.6); animation: pulse 2.4s infinite;
+  }
+  @keyframes pulse {
+    0%   { box-shadow: 0 0 0 0 rgba(63,207,142,.55); }
+    70%  { box-shadow: 0 0 0 9px rgba(63,207,142,0); }
+    100% { box-shadow: 0 0 0 0 rgba(63,207,142,0); }
+  }
+  @media (prefers-reduced-motion: reduce) { .live .pulse { animation: none; } }
+  a { color: var(--proxy); }
+
+  /* ---------- layout ---------- */
+  .main { flex: 1; display: grid; grid-template-columns: 1fr 380px; min-height: 0; }
+  @media (max-width: 980px) { .main { grid-template-columns: 1fr; } }
+
+  .stage { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+  .diagram-wrap { flex: 1; padding: 10px 18px 0; min-height: 320px; }
+  svg#topology { width: 100%; height: 100%; display: block; }
+
+  /* ---------- controls ---------- */
+  .controls {
+    display: flex; gap: 10px; flex-wrap: wrap; align-items: center;
+    padding: 14px 18px 16px; border-top: 1px solid var(--line); background: var(--panel);
+  }
+  button {
+    font-family: var(--sans); font-size: 13.5px; font-weight: 600;
+    background: var(--panel-2); color: var(--text);
+    border: 1px solid var(--line); border-radius: 8px;
+    padding: 9px 15px; cursor: pointer; transition: border-color .15s, background .15s;
+  }
+  button:hover:not(:disabled) { border-color: var(--proxy); background: #212a3d; }
+  button:disabled { opacity: .45; cursor: wait; }
+  button.primary { background: var(--proxy); border-color: var(--proxy); color: #0d1017; }
+  button.primary:hover:not(:disabled) { background: #93a0ff; border-color: #93a0ff; }
+  button.danger { border-color: #55303a; color: var(--bad); }
+  button.danger:hover:not(:disabled) { background: #2a1a1e; border-color: var(--bad); }
+  button .hint { display: block; font-weight: 400; font-size: 11px; color: var(--muted); margin-top: 1px; }
+  button.primary .hint { color: #2a2f52; }
+  .spacer { flex: 1; }
+  :focus-visible { outline: 2px solid var(--proxy); outline-offset: 2px; }
+
+  /* ---------- side panel ---------- */
+  aside {
+    border-left: 1px solid var(--line); background: var(--panel);
+    display: flex; flex-direction: column; min-height: 0;
+  }
+  @media (max-width: 980px) { aside { border-left: 0; border-top: 1px solid var(--line); } }
+  .tabs { display: flex; border-bottom: 1px solid var(--line); }
+  .tabs button {
+    flex: 1; border: 0; border-radius: 0; background: transparent; color: var(--muted);
+    padding: 11px 6px; font-size: 12.5px; border-bottom: 2px solid transparent;
+  }
+  .tabs button[aria-selected="true"] { color: var(--text); border-bottom-color: var(--proxy); background: transparent; }
+  .tabs button:hover { background: var(--panel-2); }
+
+  .pane { flex: 1; overflow-y: auto; padding: 12px 14px; min-height: 180px; }
+  .pane[hidden] { display: none; }
+
+  .headline { font-size: 13.5px; color: var(--muted); margin: 0 0 12px; line-height: 1.55; }
+  .headline b { color: var(--text); font-weight: 600; }
+
+  /* log */
+  table.log { width: 100%; border-collapse: collapse; font-family: var(--mono); font-size: 11.5px; }
+  table.log th {
+    text-align: left; color: var(--muted); font-weight: 600; padding: 0 6px 7px 0;
+    font-size: 10px; letter-spacing: .07em; text-transform: uppercase;
+    position: sticky; top: 0; background: var(--panel);
+  }
+  table.log td { padding: 3px 6px 3px 0; border-top: 1px solid #1d2432; white-space: nowrap; }
+  .s200 { color: var(--ok); } .s503 { color: var(--bad); }
+  .up-a { color: var(--warn); } .up-b { color: var(--proxy); } .up-u { color: var(--cache); }
+  .cache-hit { color: var(--cache); } .cache-miss { color: var(--muted); }
+  .empty { color: var(--muted); font-size: 12.5px; padding: 8px 0; }
+
+  /* config */
+  pre {
+    background: #0a0d13; border: 1px solid var(--line); border-radius: 7px;
+    padding: 11px 13px; overflow-x: auto; margin: 0 0 14px;
+    font-family: var(--mono); font-size: 11.6px; line-height: 1.62; color: #c8d1e4;
+  }
+  .cfg-title { font-family: var(--mono); font-size: 11px; color: var(--muted); margin: 0 0 5px; letter-spacing: .05em; }
+  .cmt { color: #5d6b85; }
+  .dir { color: var(--proxy); }
+  .val { color: var(--ok); }
+
+  /* stats */
+  .stats { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; margin-bottom: 14px; }
+  .stat { background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; }
+  .stat .n { font-family: var(--mono); font-size: 21px; font-weight: 600; line-height: 1.1; }
+  .stat .l { font-size: 10.5px; color: var(--muted); text-transform: uppercase; letter-spacing: .07em; margin-top: 3px; }
+
+  /* narration bar */
+  .narrate {
+    padding: 11px 18px; border-top: 1px solid var(--line); background: var(--panel-2);
+    font-size: 13.5px; color: var(--muted); min-height: 44px;
+    display: flex; align-items: center; gap: 9px;
+  }
+  .narrate b { color: var(--text); font-weight: 600; }
+  .narrate .tick { color: var(--ok); font-family: var(--mono); }
+
+  /* diagram text */
+  .n-title { fill: var(--text); font: 600 14px var(--sans); }
+  .n-sub   { fill: var(--muted); font: 400 11px var(--mono); }
+  .n-count { fill: var(--text); font: 600 19px var(--mono); }
+  .n-tag   { fill: var(--muted); font: 600 9.5px var(--mono); letter-spacing: .09em; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Reverse proxy &mdash; live</h1>
+  <span class="sub">nginx in front of three Spring&nbsp;Boot services</span>
+  <a href="/deep-dive.html" style="font-size:13px;margin-left:8px">full explainer &rarr;</a>
+  <span class="live"><span class="pulse"></span> <span id="liveLabel">connected</span></span>
+</header>
+
+<div class="main">
+  <div class="stage">
+    <div class="diagram-wrap">
+      <svg id="topology" viewBox="0 0 760 460" preserveAspectRatio="xMidYMid meet"
+           role="img" aria-label="Live topology: browser, nginx, and three backend services">
+        <defs>
+          <marker id="tip" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse">
+            <path d="M0 0 L10 5 L0 10 z" fill="#3a4559"/>
+          </marker>
+        </defs>
+
+        <!-- client -->
+        <rect x="290" y="14" width="180" height="46" rx="9" fill="#241d12" stroke="#e0a75e" stroke-width="1.5"/>
+        <text class="n-title" x="326" y="35">this browser</text>
+        <text class="n-sub"   x="336" y="51">the only client</text>
+
+        <!-- client <-> nginx -->
+        <path id="pathClient" d="M380 62 L380 146" stroke="#3a4559" stroke-width="1.5" fill="none" marker-end="url(#tip)"/>
+
+        <!-- nginx -->
+        <rect x="190" y="150" width="380" height="82" rx="10" fill="#1c1f3d" stroke="#7c8cff" stroke-width="2"/>
+        <text class="n-title" x="214" y="180" style="font-size:15px">nginx</text>
+        <text class="n-sub"   x="214" y="200">routes &middot; balances &middot; caches &middot; throttles</text>
+        <text class="n-sub"   x="214" y="218">the only container with a published port</text>
+        <text class="n-tag"   x="546" y="180" text-anchor="end">:8080</text>
+        <text class="n-tag"   x="546" y="196" text-anchor="end">:8443</text>
+
+        <!-- private network zone -->
+        <rect x="24" y="264" width="712" height="182" rx="12" fill="none" stroke="#262e3d" stroke-width="1.5" stroke-dasharray="6 5"/>
+        <text class="n-tag" x="38" y="284">PRIVATE DOCKER NETWORK &mdash; NO PUBLISHED PORTS</text>
+
+        <!-- paths nginx -> backends -->
+        <path id="pathA" d="M300 234 L146 300" stroke="#3a4559" stroke-width="1.5" fill="none" marker-end="url(#tip)"/>
+        <path id="pathB" d="M380 234 L380 300" stroke="#3a4559" stroke-width="1.5" fill="none" marker-end="url(#tip)"/>
+        <path id="pathU" d="M460 234 L614 300" stroke="#3a4559" stroke-width="1.5" fill="none" marker-end="url(#tip)"/>
+
+        <!-- orders-a -->
+        <g id="nodeA">
+          <rect x="46" y="304" width="200" height="118" rx="10" fill="#13211d" stroke="#3fcf8e" stroke-width="1.5"/>
+          <text class="n-title" x="68" y="330">orders-a</text>
+          <text class="n-sub"   x="68" y="348">Spring Boot</text>
+          <text class="n-count" x="68" y="390" id="countA">0</text>
+          <text class="n-sub"   x="68" y="408" id="stateA">healthy</text>
+        </g>
+
+        <!-- orders-b -->
+        <g id="nodeB">
+          <rect x="280" y="304" width="200" height="118" rx="10" fill="#13211d" stroke="#3fcf8e" stroke-width="1.5"/>
+          <text class="n-title" x="302" y="330">orders-b</text>
+          <text class="n-sub"   x="302" y="348">identical image</text>
+          <text class="n-count" x="302" y="390" id="countB">0</text>
+          <text class="n-sub"   x="302" y="408" id="stateB">healthy</text>
+        </g>
+
+        <!-- users -->
+        <g id="nodeU">
+          <rect x="514" y="304" width="200" height="118" rx="10" fill="#13211d" stroke="#3fcf8e" stroke-width="1.5"/>
+          <text class="n-title" x="536" y="330">users-service</text>
+          <text class="n-sub"   x="536" y="348">a different app</text>
+          <text class="n-count" x="536" y="390" id="countU">0</text>
+          <text class="n-sub"   x="536" y="408" id="stateU">healthy</text>
+        </g>
+
+        <g id="dots"></g>
+      </svg>
+    </div>
+
+    <div class="controls">
+      <button class="primary" id="btnTraffic" onclick="demoTraffic(this)">
+        Send 6 requests<span class="hint">watch them alternate</span>
+      </button>
+      <button id="btnUsers" onclick="demoUsers(this)">
+        Call the other service<span class="hint">same origin, different app</span>
+      </button>
+      <button id="btnCache" onclick="demoCache(this)">
+        Slow report &times;2<span class="hint">2s, then instant</span>
+      </button>
+      <button id="btnFlood" onclick="demoFlood(this)">
+        Flood 20 requests<span class="hint">rate limit kicks in</span>
+      </button>
+      <span class="spacer"></span>
+      <button class="danger" id="btnKill" onclick="toggleKill(this)">
+        Break orders-b<span class="hint">a real 503, not a mock</span>
+      </button>
+      <button id="btnReset" onclick="resetCounters()">Reset</button>
+    </div>
+
+    <div class="narrate" id="narrate">
+      <span>Press <b>Send 6 requests</b> to begin. Every request below is real HTTP through nginx.</span>
+    </div>
+  </div>
+
+  <aside>
+    <div class="tabs" role="tablist">
+      <button role="tab" aria-selected="true"  aria-controls="paneLog"    id="tabLog"    onclick="showTab('Log')">Live log</button>
+      <button role="tab" aria-selected="false" aria-controls="paneConfig" id="tabConfig" onclick="showTab('Config')">The config</button>
+      <button role="tab" aria-selected="false" aria-controls="paneHeaders" id="tabHeaders" onclick="showTab('Headers')">Headers</button>
+    </div>
+
+    <div class="pane" id="paneLog" role="tabpanel" aria-labelledby="tabLog">
+      <div class="stats">
+        <div class="stat"><div class="n" id="statTotal">0</div><div class="l">requests</div></div>
+        <div class="stat"><div class="n s200" id="statOk">0</div><div class="l">200 OK</div></div>
+        <div class="stat"><div class="n s503" id="statBlocked">0</div><div class="l">blocked 503</div></div>
+        <div class="stat"><div class="n cache-hit" id="statCache">0</div><div class="l">from cache</div></div>
+      </div>
+      <table class="log">
+        <thead><tr><th>path</th><th>st</th><th>served by</th><th>ms</th></tr></thead>
+        <tbody id="logBody"></tbody>
+      </table>
+      <div class="empty" id="logEmpty">Nothing yet &mdash; press a button.</div>
+    </div>
+
+    <div class="pane" id="paneConfig" role="tabpanel" aria-labelledby="tabConfig" hidden>
+      <p class="headline" id="cfgIntro">The nginx directives behind whatever you just pressed.</p>
+      <div id="cfgBody"></div>
+    </div>
+
+    <div class="pane" id="paneHeaders" role="tabpanel" aria-labelledby="tabHeaders" hidden>
+      <p class="headline">
+        What the <b>Java app</b> sees, once nginx has told it who the real caller is.
+        This is the one thing a proxy breaks &mdash; and the one line of config that fixes it.
+      </p>
+      <div id="hdrBody"><div class="empty">Press a button to populate.</div></div>
+    </div>
+  </aside>
+</div>
+
+<script>
+// ---------------------------------------------------------------------------
+// Everything here fires REAL requests at nginx. Nothing is simulated: the dots
+// animate only after a response comes back, and they follow whichever upstream
+// actually answered, read off the response headers and body.
+// ---------------------------------------------------------------------------
+const $ = id => document.getElementById(id);
+const svg = $('topology');
+const dotsLayer = $('dots');
+
+const paths = {
+  client: $('pathClient'),
+  a: $('pathA'), b: $('pathB'), u: $('pathU')
+};
+const nodes = {
+  a: { rect: $('nodeA').querySelector('rect'), count: $('countA'), state: $('stateA'), n: 0 },
+  b: { rect: $('nodeB').querySelector('rect'), count: $('countB'), state: $('stateB'), n: 0 },
+  u: { rect: $('nodeU').querySelector('rect'), count: $('countU'), state: $('stateU'), n: 0 }
+};
+
+const COLORS = { ok: '#3fcf8e', bad: '#f2695f', cache: '#4ec9e8', warn: '#e9b949' };
+const REDUCED = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+let stats = { total: 0, ok: 0, blocked: 0, cache: 0 };
+let killed = false;
+
+// ---- narration -------------------------------------------------------------
+function narrate(html) { $('narrate').innerHTML = '<span>' + html + '</span>'; }
+
+// ---- the animated dot ------------------------------------------------------
+// Travels client -> nginx, then on to the backend that really answered (or
+// turns around at nginx for a cache hit / a rate-limited rejection).
+function flyDot(target, color, turnAtProxy) {
+  return new Promise(resolve => {
+    if (REDUCED) { resolve(); return; }
+    const dot = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+    dot.setAttribute('r', 5);
+    dot.setAttribute('fill', color);
+    dot.setAttribute('opacity', '0.95');
+    dotsLayer.appendChild(dot);
+
+    const legs = turnAtProxy
+      ? [[paths.client, false], [paths.client, true]]
+      : [[paths.client, false], [paths[target], false], [paths[target], true], [paths.client, true]];
+
+    const DUR = turnAtProxy ? 230 : 190;
+    let leg = 0, start = null;
+
+    function step(ts) {
+      if (!start) start = ts;
+      const [path, reverse] = legs[leg];
+      const len = path.getTotalLength();
+      let t = Math.min((ts - start) / DUR, 1);
+      const pt = path.getPointAtLength(reverse ? len * (1 - t) : len * t);
+      dot.setAttribute('cx', pt.x);
+      dot.setAttribute('cy', pt.y);
+      if (t < 1) { requestAnimationFrame(step); return; }
+      leg++; start = null;
+      if (leg < legs.length) { requestAnimationFrame(step); return; }
+      dot.remove(); resolve();
+    }
+    requestAnimationFrame(step);
+  });
+}
+
+function pingNode(key, color) {
+  const n = nodes[key]; if (!n) return;
+  n.n++; n.count.textContent = n.n;
+  n.rect.setAttribute('stroke', color);
+  n.rect.setAttribute('stroke-width', '3');
+  setTimeout(() => {
+    n.rect.setAttribute('stroke-width', '1.5');
+    if (!(key === 'b' && killed)) n.rect.setAttribute('stroke', COLORS.ok);
+  }, 320);
+}
+
+// ---- the real request ------------------------------------------------------
+async function call(path, label) {
+  const t0 = performance.now();
+  let res, raw;
+  try {
+    res = await fetch(path, { cache: 'no-store' });
+    raw = await res.text();            // read ONCE - a 503 body is HTML, not JSON
+  } catch (e) {
+    logRow(label || path, 'ERR', '—', Math.round(performance.now() - t0), 'bad');
+    return { failed: true };
+  }
+  const ms = Math.round(performance.now() - t0);
+  let body = null;
+  try { body = JSON.parse(raw); } catch { /* nginx error pages are HTML */ }
+
+  const cache = res.headers.get('X-Cache-Status');
+  const servedBy = body && body.servedBy;
+  const key = servedBy === 'orders-a' ? 'a' : servedBy === 'orders-b' ? 'b'
+            : servedBy === 'users-1' ? 'u' : null;
+
+  stats.total++;
+  if (res.status === 200) stats.ok++; else stats.blocked++;
+  const isHit = cache === 'HIT' || cache === 'STALE';
+  if (isHit) stats.cache++;
+  paintStats();
+
+  const blocked = res.status !== 200;
+  const color = blocked ? COLORS.bad : isHit ? COLORS.cache : COLORS.ok;
+
+  // A cache hit or a rejected request never reaches a backend - the dot turns
+  // around at nginx, which is the whole point being shown.
+  const turn = blocked || isHit || !key;
+  flyDot(key, color, turn);
+  if (!turn && key) setTimeout(() => pingNode(key, color), 190);
+
+  logRow(label || path, res.status,
+         blocked ? 'nginx (refused)' : isHit ? 'nginx (cache)' : (servedBy || '—'),
+         ms, blocked ? 'bad' : isHit ? 'cache' : key);
+
+  return { status: res.status, ms, cache, servedBy, body, key, blocked, isHit };
+}
+
+// ---- log + stats -----------------------------------------------------------
+function logRow(path, status, servedBy, ms, kind) {
+  $('logEmpty').hidden = true;
+  const tr = document.createElement('tr');
+  const cls = status === 200 ? 's200' : 's503';
+  const upCls = kind === 'a' ? 'up-a' : kind === 'b' ? 'up-b' : kind === 'u' ? 'up-u'
+              : kind === 'cache' ? 'cache-hit' : 's503';
+  tr.innerHTML =
+    '<td>' + path + '</td>' +
+    '<td class="' + cls + '">' + status + '</td>' +
+    '<td class="' + upCls + '">' + servedBy + '</td>' +
+    '<td>' + ms + '</td>';
+  const body = $('logBody');
+  body.prepend(tr);
+  while (body.children.length > 60) body.lastChild.remove();
+}
+
+function paintStats() {
+  $('statTotal').textContent = stats.total;
+  $('statOk').textContent = stats.ok;
+  $('statBlocked').textContent = stats.blocked;
+  $('statCache').textContent = stats.cache;
+}
+
+function resetCounters() {
+  stats = { total: 0, ok: 0, blocked: 0, cache: 0 };
+  paintStats();
+  for (const k of ['a','b','u']) { nodes[k].n = 0; nodes[k].count.textContent = '0'; }
+  $('logBody').innerHTML = '';
+  $('logEmpty').hidden = false;
+  narrate('Counters cleared.');
+}
+
+// ---- tabs ------------------------------------------------------------------
+function showTab(name) {
+  for (const t of ['Log','Config','Headers']) {
+    $('pane' + t).hidden = (t !== name);
+    $('tab' + t).setAttribute('aria-selected', String(t === name));
+  }
+}
+
+function showConfig(intro, blocks) {
+  $('cfgIntro').innerHTML = intro;
+  $('cfgBody').innerHTML = blocks.map(b =>
+    '<p class="cfg-title">' + b[0] + '</p><pre>' + b[1] + '</pre>').join('');
+}
+
+// ---- demos -----------------------------------------------------------------
+function busy(btn, on) { btn.disabled = on; }
+
+async function demoTraffic(btn) {
+  busy(btn, true);
+  narrate('Six requests to the <b>same URL</b>. Watch which box lights up each time&hellip;');
+  showConfig(
+    'Two identical containers in one pool. nginx hands each request to the next one in turn.',
+    [['nginx.conf', '<span class="dir">upstream</span> orders_backend {\n' +
+      '    server orders-a:8080 <span class="val">max_fails=1 fail_timeout=10s</span>;\n' +
+      '    server orders-b:8080 <span class="val">max_fails=1 fail_timeout=10s</span>;\n' +
+      '    keepalive 16;\n}\n\n' +
+      '<span class="cmt"># swap the policy and nothing else changes:</span>\n' +
+      '<span class="cmt">#   least_conn;  ip_hash;  server ... weight=3;</span>']]);
+  const seen = {};
+  for (let i = 0; i < 6; i++) {
+    const r = await call('/api/orders');
+    if (r.servedBy) seen[r.servedBy] = (seen[r.servedBy] || 0) + 1;
+    await sleep(420);
+  }
+  const names = Object.keys(seen);
+  narrate(names.length > 1
+    ? '<span class="tick">&check;</span> Split <b>' + names.map(n => seen[n] + ' to ' + n).join(' and ') +
+      '</b> &mdash; one URL, two machines. Scaling out is a line of config.'
+    : '<span class="tick">&check;</span> All six went to <b>' + (names[0] || 'one replica') +
+      '</b>. The other is out of the pool &mdash; and nobody got an error.');
+  busy(btn, false);
+}
+
+async function demoUsers(btn) {
+  busy(btn, true);
+  narrate('Same host, same port &mdash; but <b>/api/users</b> is a completely different application.');
+  showConfig(
+    'nginx reads the URL and picks a backend. One origin, many services behind it.',
+    [['nginx.conf',
+      '<span class="dir">location</span> /api/orders { proxy_pass http://orders_backend; }\n' +
+      '<span class="dir">location</span> /api/users  { proxy_pass http://users_backend;  }\n\n' +
+      '<span class="cmt"># /actuator/health has no location block,</span>\n' +
+      '<span class="cmt"># so from outside it simply does not exist -> 404.</span>']]);
+  await call('/api/orders');
+  await sleep(500);
+  await call('/api/users');
+  await sleep(400);
+  const probe = await fetch('/actuator/health').catch(() => null);
+  narrate('<span class="tick">&check;</span> Two different applications, one address &mdash; the browser cannot tell. ' +
+          'And <b>/actuator/health</b> returns <b>' + (probe ? probe.status : '404') +
+          '</b>: not routed, therefore not reachable.');
+  busy(btn, false);
+}
+
+async function demoCache(btn) {
+  busy(btn, true);
+  showConfig(
+    'A deliberately slow endpoint, cached by nginx for 30 seconds.',
+    [['nginx.conf',
+      '<span class="dir">proxy_cache</span> users_cache;\n' +
+      '<span class="dir">proxy_cache_valid</span> 200 <span class="val">30s</span>;\n' +
+      '<span class="dir">proxy_cache_lock</span> on;   <span class="cmt"># no stampede on expiry</span>\n' +
+      '<span class="dir">proxy_cache_use_stale</span> error timeout updating ...;']]);
+  const key = '?demo=' + Date.now();
+  narrate('First call &mdash; nothing cached, so this really does take <b>two seconds</b>&hellip;');
+  const first = await call('/api/users/slow' + key, '/api/users/slow');
+  narrate('That took <b>' + first.ms + ' ms</b> and reached the Java app. Now the identical call again&hellip;');
+  await sleep(600);
+  const second = await call('/api/users/slow' + key, '/api/users/slow');
+  const factor = second.ms > 0 ? Math.round(first.ms / second.ms) : '';
+  narrate('<span class="tick">&check;</span> <b>' + first.ms + ' ms &rarr; ' + second.ms + ' ms</b>' +
+          (factor ? ' (~' + factor + '&times; faster)' : '') +
+          '. The second dot turned around <b>at nginx</b> &mdash; the Java app was never woken.');
+  busy(btn, false);
+}
+
+async function demoFlood(btn) {
+  busy(btn, true);
+  narrate('Twenty requests at once at an endpoint capped to <b>5/second</b>&hellip;');
+  showConfig(
+    'A bucket per client IP. Over budget, nginx refuses the request itself.',
+    [['nginx.conf',
+      '<span class="dir">limit_req_zone</span> $binary_remote_addr\n' +
+      '    zone=orders_limit:10m <span class="val">rate=5r/s</span>;\n\n' +
+      '<span class="dir">location</span> /api/orders/limited {\n' +
+      '    <span class="dir">limit_req</span> zone=orders_limit <span class="val">burst=5 nodelay</span>;\n' +
+      '    <span class="dir">limit_req_status</span> 503;\n}']]);
+  const jobs = [];
+  for (let i = 0; i < 20; i++) jobs.push(call('/api/orders/limited'));
+  const results = await Promise.all(jobs);
+  const ok = results.filter(r => r.status === 200).length;
+  narrate('<span class="tick">&check;</span> <b>' + ok + ' admitted, ' + (20 - ok) + ' refused</b> &mdash; ' +
+          'and refused by nginx. Those ' + (20 - ok) + ' never became Java threads or database connections.');
+  busy(btn, false);
+}
+
+// The button never trusts a local flag: it sends the request, reads the replica's
+// OWN reported state back, and paints from that. So a reload, a second browser, or
+// a failed request can't leave the button meaning the opposite of what it says.
+function applyReplicaState(failing, { recovering = false } = {}) {
+  killed = failing;
+  const btn = $('btnKill');
+  if (failing) {
+    nodes.b.rect.setAttribute('stroke', COLORS.bad);
+    nodes.b.state.textContent = 'FAILING (503)';
+    nodes.b.state.setAttribute('fill', '#f2695f');
+    btn.innerHTML = 'Revive orders-b<span class="hint">watch it rejoin</span>';
+    btn.classList.remove('danger');
+  } else {
+    nodes.b.rect.setAttribute('stroke', recovering ? COLORS.warn : COLORS.ok);
+    nodes.b.state.textContent = recovering ? 'rejoining…' : 'healthy';
+    nodes.b.state.setAttribute('fill', recovering ? '#e9b949' : '#8b95ab');
+    btn.innerHTML = 'Break orders-b<span class="hint">a real 503, not a mock</span>';
+    btn.classList.add('danger');
+  }
+}
+
+async function syncReplicaState() {
+  try {
+    const s = await fetch('/_control/orders-b/status', { cache: 'no-store' }).then(r => r.json());
+    applyReplicaState(s.failing);
+    return s.failing;
+  } catch (e) {
+    $('liveLabel').textContent = 'control plane unavailable';
+    return null;
+  }
+}
+
+async function toggleKill(btn) {
+  busy(btn, true);
+  const wantFailing = !killed;
+  narrate(wantFailing
+    ? 'Telling <b>orders-b</b> to start failing for real&hellip;'
+    : 'Repairing <b>orders-b</b>&hellip;');
+
+  let state;
+  try {
+    const res = await fetch('/_control/orders-b/' + (wantFailing ? 'fail' : 'heal'), { method: 'POST' });
+    state = await res.json();
+  } catch (e) {
+    narrate('Could not reach the control endpoint — is the stack still running?');
+    busy(btn, false);
+    return;
+  }
+
+  if (state.failing) {
+    applyReplicaState(true);
+    showConfig(
+      'orders-b now answers every request with a genuine 503. nginx notices and reroutes.',
+      [['nginx.conf',
+        '<span class="dir">upstream</span> orders_backend {\n' +
+        '    server orders-a:8080 <span class="val">max_fails=1 fail_timeout=10s</span>;\n' +
+        '    server orders-b:8080 <span class="val">max_fails=1 fail_timeout=10s</span>;\n}\n\n' +
+        '<span class="dir">proxy_next_upstream</span> error timeout\n' +
+        '    <span class="val">http_502 http_503 http_504</span>;\n\n' +
+        '<span class="cmt"># 503 counts as a failed attempt, so max_fails pulls</span>\n' +
+        '<span class="cmt"># orders-b out of the pool, and proxy_next_upstream</span>\n' +
+        '<span class="cmt"># retries that request on orders-a. The client sees 200.</span>']]);
+    narrate('<b>orders-b is down</b> — confirmed by the replica itself. Now press ' +
+            '<b>Send 6 requests</b> and watch the blocked count stay at zero.');
+  } else {
+    // Healed at the app, but nginx still has it benched until fail_timeout expires.
+    // Say so, rather than showing "healthy" while every request still goes elsewhere.
+    applyReplicaState(false, { recovering: true });
+    narrate('<span class="tick">&check;</span> <b>orders-b</b> is serving again, but nginx still has it ' +
+            'benched for up to <b>fail_timeout</b> (10s). Watch the label&hellip;');
+    setTimeout(() => {
+      if (!killed) {
+        applyReplicaState(false);
+        narrate('<span class="tick">&check;</span> <b>orders-b</b> is back in the pool. Send traffic — the split returns.');
+      }
+    }, 10500);
+  }
+  busy(btn, false);
+}
+
+// ---- headers pane ----------------------------------------------------------
+async function loadHeaders() {
+  const res = await fetch('/api/users/whoami', { cache: 'no-store' });
+  const d = await res.json();
+  const seen = d.whatTheBackendSees || {};
+  $('hdrBody').innerHTML =
+    '<p class="cfg-title">what the Java app sees</p><pre>' +
+    'remoteAddr  <span class="val">' + seen.remoteAddr + '</span>\n' +
+    'requestURL  <span class="val">' + seen.requestURL + '</span>\n' +
+    'scheme      <span class="val">' + seen.scheme + '</span>\n' +
+    'isSecure    <span class="val">' + seen.isSecure + '</span>' +
+    '</pre>' +
+    '<p class="cfg-title">nginx hands the truth forward</p><pre>' +
+    '<span class="dir">proxy_set_header</span> X-Real-IP         $remote_addr;\n' +
+    '<span class="dir">proxy_set_header</span> X-Forwarded-For   $proxy_add_x_forwarded_for;\n' +
+    '<span class="dir">proxy_set_header</span> X-Forwarded-Proto $scheme;\n' +
+    '<span class="dir">proxy_set_header</span> X-Forwarded-Host  $host;\n' +
+    '<span class="dir">proxy_set_header</span> X-Forwarded-Port  $server_port;' +
+    '</pre>' +
+    '<p class="cfg-title">spring reads them back</p><pre>' +
+    'server:\n  <span class="dir">forward-headers-strategy</span>: <span class="val">framework</span>\n\n' +
+    '<span class="cmt"># without this the app reports nginx\'s address</span>\n' +
+    '<span class="cmt"># and loses the client\'s real port and scheme.</span>' +
+    '</pre>' +
+    '<p class="headline" style="margin-top:12px">Compare <a href="/api/orders/whoami" target="_blank">/api/orders/whoami</a>, ' +
+    'which runs with the filter <b>off</b>, against <a href="/api/users/whoami" target="_blank">/api/users/whoami</a>, ' +
+    'which has it <b>on</b>.</p>';
+}
+
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+// ---- boot ------------------------------------------------------------------
+(async function init() {
+  showConfig('The nginx directives behind whatever you just pressed. Press a button to populate.',
+    [['nginx.conf — the shape of it',
+      '<span class="dir">upstream</span> orders_backend { ... }\n' +
+      '<span class="dir">server</span> {\n' +
+      '    listen 8080;\n    listen 8443 ssl;\n' +
+      '    <span class="dir">location</span> /api/orders { proxy_pass http://orders_backend; }\n' +
+      '    <span class="dir">location</span> /api/users  { proxy_pass http://users_backend;  }\n}']]);
+  loadHeaders().catch(() => {});
+  const failing = await syncReplicaState();
+  if (failing) {
+    narrate('<b>orders-b is still broken</b> from an earlier run. Press <b>Revive orders-b</b>, or send traffic to see failover.');
+  }
+  // Re-check when you come back to the tab, so the button can never lie about
+  // which way it will toggle.
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) syncReplicaState();
+  });
+})();
+</script>
+</body>
+</html>

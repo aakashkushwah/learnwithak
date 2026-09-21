@@ -1,0 +1,1016 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Reverse Proxy, Drawn Out</title>
+<style>
+  :root {
+    --bg: #f6f7f9;
+    --surface: #ffffff;
+    --surface-2: #eef0f4;
+    --text: #181c24;
+    --muted: #5b6472;
+    --border: #d9dee6;
+    --accent: #4f46e5;
+    --accent-soft: #eceafd;
+    --client: #b45309;
+    --client-soft: #fdf1e0;
+    --backend: #0f766e;
+    --backend-soft: #e3f2f0;
+    --danger: #b91c1c;
+    --danger-soft: #fdeaea;
+    --ok: #15803d;
+    --code-bg: #f2f4f8;
+    --shadow: 0 1px 2px rgba(20,25,35,.06), 0 8px 24px rgba(20,25,35,.06);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0f1115;
+      --surface: #171a21;
+      --surface-2: #1e222b;
+      --text: #e7e9ee;
+      --muted: #99a2b2;
+      --border: #2b313c;
+      --accent: #8b85f5;
+      --accent-soft: #232043;
+      --client: #e0a458;
+      --client-soft: #302518;
+      --backend: #4dd4c0;
+      --backend-soft: #15302d;
+      --danger: #f87171;
+      --danger-soft: #331c1c;
+      --ok: #4ade80;
+      --code-bg: #12151b;
+      --shadow: 0 1px 2px rgba(0,0,0,.4), 0 8px 24px rgba(0,0,0,.3);
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 16px/1.65 -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 900px; margin: 0 auto; padding: 0 16px 96px; }
+
+  header.hero { padding: 64px 0 40px; border-bottom: 1px solid var(--border); margin-bottom: 8px; }
+  .eyebrow {
+    font-size: 12px; letter-spacing: .12em; text-transform: uppercase;
+    color: var(--accent); font-weight: 650; margin: 0 0 12px;
+  }
+  h1 { font-size: clamp(30px, 6vw, 46px); line-height: 1.12; margin: 0 0 16px; letter-spacing: -.02em; }
+  .lede { font-size: 18px; color: var(--muted); margin: 0 0 24px; max-width: 62ch; }
+  .youare {
+    display: flex; gap: 12px; align-items: flex-start;
+    background: var(--accent-soft); border: 1px solid var(--border);
+    border-radius: 10px; padding: 14px 16px; font-size: 14.5px; max-width: 64ch;
+  }
+  .youare svg { flex: none; margin-top: 2px; }
+
+  section { padding: 48px 0 8px; border-bottom: 1px solid var(--border); }
+  section:last-of-type { border-bottom: 0; }
+  h2 { font-size: 26px; letter-spacing: -.01em; margin: 0 0 6px; display: flex; align-items: baseline; gap: 12px; }
+  h2 .num {
+    font-size: 13px; font-weight: 700; color: var(--accent);
+    background: var(--accent-soft); border-radius: 6px; padding: 3px 9px; flex: none;
+  }
+  h3 { font-size: 16px; margin: 28px 0 8px; letter-spacing: -.005em; }
+  p { margin: 0 0 14px; max-width: 68ch; }
+  .muted { color: var(--muted); }
+  strong { font-weight: 650; }
+
+  figure { margin: 24px 0; }
+  figure svg { width: 100%; height: auto; display: block; }
+  figcaption { font-size: 13.5px; color: var(--muted); margin-top: 10px; text-align: center; }
+
+  /* ---- diagram theming ---- */
+  .d-box { fill: var(--surface); stroke: var(--border); stroke-width: 1.5; }
+  .d-proxy { fill: var(--accent-soft); stroke: var(--accent); stroke-width: 2; }
+  .d-backend { fill: var(--backend-soft); stroke: var(--backend); stroke-width: 1.5; }
+  .d-client { fill: var(--client-soft); stroke: var(--client); stroke-width: 1.5; }
+  .d-danger { fill: var(--danger-soft); stroke: var(--danger); stroke-width: 1.5; }
+  .d-label { fill: var(--text); font: 600 13px -apple-system, "Segoe UI", sans-serif; }
+  .d-sub { fill: var(--muted); font: 400 11px ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .d-tag { fill: var(--muted); font: 600 10.5px -apple-system, "Segoe UI", sans-serif; letter-spacing: .06em; }
+  .d-line { stroke: var(--muted); stroke-width: 1.5; fill: none; }
+  .d-line-accent { stroke: var(--accent); stroke-width: 2; fill: none; }
+  .d-dash { stroke: var(--border); stroke-width: 1.5; fill: none; stroke-dasharray: 5 4; }
+  .d-zone { fill: none; stroke: var(--border); stroke-width: 1.5; stroke-dasharray: 6 5; }
+
+  pre {
+    background: var(--code-bg); border: 1px solid var(--border); border-radius: 10px;
+    padding: 14px 16px; overflow-x: auto; margin: 14px 0;
+    font: 13px/1.6 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: .92em; }
+  p code, li code, td code { background: var(--code-bg); padding: 1px 5px; border-radius: 4px; }
+  .filename {
+    font: 600 11.5px ui-monospace, Menlo, monospace; color: var(--muted);
+    letter-spacing: .04em; margin: 18px 0 -6px; display: block;
+  }
+
+  .demo {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
+    padding: 18px; margin: 22px 0 8px; box-shadow: var(--shadow);
+  }
+  .demo-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 4px; }
+  .demo-title { font-weight: 650; font-size: 14.5px; }
+  button {
+    font: 600 13.5px -apple-system, "Segoe UI", sans-serif;
+    background: var(--accent); color: #fff; border: 0; border-radius: 8px;
+    padding: 9px 16px; cursor: pointer; transition: opacity .15s;
+  }
+  button:hover { opacity: .88; }
+  button:disabled { opacity: .5; cursor: progress; }
+  .out {
+    margin-top: 14px; font: 12.5px/1.6 ui-monospace, Menlo, monospace;
+    background: var(--code-bg); border: 1px solid var(--border); border-radius: 8px;
+    padding: 12px 14px; white-space: pre-wrap; word-break: break-word;
+    max-height: 340px; overflow: auto;
+  }
+  .out:empty { display: none; }
+  .chips { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 12px; }
+  .chip {
+    font: 600 11.5px ui-monospace, Menlo, monospace; padding: 4px 9px;
+    border-radius: 999px; border: 1px solid var(--border); background: var(--surface-2);
+  }
+  .chip.a { background: var(--backend-soft); border-color: var(--backend); color: var(--backend); }
+  .chip.b { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
+  .chip.bad { background: var(--danger-soft); border-color: var(--danger); color: var(--danger); }
+
+  table { border-collapse: collapse; width: 100%; margin: 18px 0; font-size: 14.5px; }
+  th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  th { font-size: 12px; text-transform: uppercase; letter-spacing: .07em; color: var(--muted); font-weight: 650; }
+
+  .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+  @media (max-width: 680px) { .cols { grid-template-columns: 1fr; } }
+
+  .note {
+    border-left: 3px solid var(--accent); background: var(--surface-2);
+    padding: 12px 16px; border-radius: 0 8px 8px 0; margin: 18px 0; font-size: 14.5px;
+  }
+  .note strong { color: var(--accent); }
+
+  footer { padding: 48px 0 0; color: var(--muted); font-size: 14.5px; }
+  a { color: var(--accent); }
+  ul { max-width: 68ch; }
+  li { margin-bottom: 6px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="hero">
+  <p class="eyebrow">Spring Boot &middot; nginx &middot; Docker Compose &nbsp;&middot;&nbsp; <a href="/">&larr; live demo</a></p>
+  <h1>Reverse proxy, drawn out</h1>
+  <p class="lede">
+    Seven things a reverse proxy does for you, each one explained, drawn, and then
+    actually executed against the running stack on this machine.
+  </p>
+  <div class="youare">
+    <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true">
+      <circle cx="9" cy="9" r="8" fill="none" stroke="currentColor" stroke-width="1.5"/>
+      <path d="M9 8v5M9 5.2v.1" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+    </svg>
+    <div>
+      <strong>This page is inside the demo.</strong> nginx served you this HTML off its own disk.
+      The buttons below fire real requests through that same nginx to the Spring Boot containers
+      behind it. Current origin: <code id="origin">-</code>
+    </div>
+  </div>
+</header>
+
+<!-- ===================== WHAT IT IS ===================== -->
+<section>
+  <h2>First, the shape of the thing</h2>
+  <p>
+    A <strong>forward proxy</strong> stands in front of <em>clients</em> and speaks to the internet
+    on their behalf. A <strong>reverse proxy</strong> stands in front of <em>servers</em> and speaks
+    to clients on theirs. Same machinery, pointed the other way — and that reversal is the whole idea.
+  </p>
+
+  <figure>
+    <svg viewBox="0 0 860 250" role="img" aria-label="Forward proxy versus reverse proxy, side by side">
+      <text class="d-tag" x="12" y="18">FORWARD PROXY — HIDES THE CLIENTS</text>
+      <rect class="d-zone" x="8" y="28" width="410" height="200" rx="10"/>
+      <rect class="d-client" x="28" y="52" width="82" height="34" rx="7"/>
+      <text class="d-label" x="49" y="74">user A</text>
+      <rect class="d-client" x="28" y="102" width="82" height="34" rx="7"/>
+      <text class="d-label" x="49" y="124">user B</text>
+      <rect class="d-client" x="28" y="152" width="82" height="34" rx="7"/>
+      <text class="d-label" x="49" y="174">user C</text>
+      <path class="d-line" d="M112 69 H168 L182 111" marker-end="url(#ar)"/>
+      <path class="d-line" d="M112 119 H182" marker-end="url(#ar)"/>
+      <path class="d-line" d="M112 169 H168 L182 127" marker-end="url(#ar)"/>
+      <rect class="d-box" x="186" y="92" width="86" height="56" rx="8"/>
+      <text class="d-label" x="199" y="117">forward</text>
+      <text class="d-label" x="203" y="134">proxy</text>
+      <path class="d-line" d="M276 120 H322" marker-end="url(#ar)"/>
+      <rect class="d-box" x="326" y="92" width="76" height="56" rx="8"/>
+      <text class="d-label" x="342" y="125">internet</text>
+
+      <text class="d-tag" x="452" y="18">REVERSE PROXY — HIDES THE SERVERS</text>
+      <rect class="d-zone" x="448" y="28" width="404" height="200" rx="10"/>
+      <rect class="d-client" x="464" y="92" width="76" height="56" rx="8"/>
+      <text class="d-label" x="483" y="125">clients</text>
+      <path class="d-line-accent" d="M544 120 H588" marker-end="url(#ara)"/>
+      <rect class="d-proxy" x="592" y="92" width="86" height="56" rx="8"/>
+      <text class="d-label" x="608" y="117">reverse</text>
+      <text class="d-label" x="612" y="134">proxy</text>
+      <path class="d-line" d="M682 111 L696 69 H748" marker-end="url(#ar)"/>
+      <path class="d-line" d="M682 119 H748" marker-end="url(#ar)"/>
+      <path class="d-line" d="M682 127 L696 169 H748" marker-end="url(#ar)"/>
+      <rect class="d-backend" x="752" y="52" width="82" height="34" rx="7"/>
+      <text class="d-label" x="775" y="74">app 1</text>
+      <rect class="d-backend" x="752" y="102" width="82" height="34" rx="7"/>
+      <text class="d-label" x="775" y="124">app 2</text>
+      <rect class="d-backend" x="752" y="152" width="82" height="34" rx="7"/>
+      <text class="d-label" x="775" y="174">app 3</text>
+
+      <defs>
+        <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+          <path d="M0 0 L10 5 L0 10 z" fill="var(--muted)"/>
+        </marker>
+        <marker id="ara" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+          <path d="M0 0 L10 5 L0 10 z" fill="var(--accent)"/>
+        </marker>
+      </defs>
+    </svg>
+    <figcaption>The client never learns how many servers there are, or which one answered.</figcaption>
+  </figure>
+
+  <h3>What is actually running right now</h3>
+  <figure>
+    <svg viewBox="0 0 860 420" role="img" aria-label="Topology of this demo: nginx in front of three Spring Boot containers">
+      <rect class="d-client" x="330" y="14" width="200" height="46" rx="8"/>
+      <text class="d-label" x="366" y="35">your browser / curl</text>
+      <text class="d-sub" x="392" y="51">this page</text>
+
+      <path class="d-line-accent" d="M400 62 V104" marker-end="url(#ar2)"/>
+      <text class="d-sub" x="243" y="88">:8080 http</text>
+      <path class="d-line-accent" d="M460 62 V104" marker-end="url(#ar2)"/>
+      <text class="d-sub" x="472" y="88">:8443 https (TLS ends here)</text>
+
+      <rect class="d-proxy" x="230" y="108" width="400" height="82" rx="10"/>
+      <text class="d-label" x="254" y="136" style="font-size:15px">nginx &mdash; the reverse proxy</text>
+      <text class="d-sub" x="254" y="157">routes &middot; balances &middot; caches &middot; throttles &middot; terminates TLS</text>
+      <text class="d-sub" x="254" y="175">the only container with published ports</text>
+
+      <rect class="d-zone" x="44" y="214" width="772" height="186" rx="12"/>
+      <text class="d-tag" x="58" y="236">PRIVATE DOCKER NETWORK — UNREACHABLE FROM YOUR MACHINE</text>
+
+      <path class="d-line" d="M330 192 L190 258" marker-end="url(#ar2)"/>
+      <text class="d-sub" x="176" y="226">/api/orders</text>
+      <path class="d-line" d="M400 192 L400 258" marker-end="url(#ar2)"/>
+      <path class="d-line" d="M530 192 L660 258" marker-end="url(#ar2)"/>
+      <text class="d-sub" x="592" y="226">/api/users</text>
+
+      <rect class="d-backend" x="82" y="262" width="204" height="104" rx="9"/>
+      <text class="d-label" x="106" y="292">orders-a</text>
+      <text class="d-sub" x="106" y="312">Spring Boot &middot; :8080</text>
+      <text class="d-sub" x="106" y="330">INSTANCE_NAME=orders-a</text>
+      <text class="d-sub" x="106" y="350">no published port</text>
+
+      <rect class="d-backend" x="300" y="262" width="204" height="104" rx="9"/>
+      <text class="d-label" x="324" y="292">orders-b</text>
+      <text class="d-sub" x="324" y="312">Spring Boot &middot; :8080</text>
+      <text class="d-sub" x="324" y="330">identical image</text>
+      <text class="d-sub" x="324" y="350">no published port</text>
+
+      <rect class="d-backend" x="576" y="262" width="204" height="104" rx="9"/>
+      <text class="d-label" x="600" y="292">users-service</text>
+      <text class="d-sub" x="600" y="312">Spring Boot &middot; :8080</text>
+      <text class="d-sub" x="600" y="330">a different app</text>
+      <text class="d-sub" x="600" y="350">no published port</text>
+
+      <path class="d-dash" d="M286 314 H300"/>
+      <text class="d-sub" x="196" y="388">round-robin pair</text>
+
+      <defs>
+        <marker id="ar2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+          <path d="M0 0 L10 5 L0 10 z" fill="var(--muted)"/>
+        </marker>
+      </defs>
+    </svg>
+    <figcaption>Three Java processes, one public door. Try <code>curl localhost:8081</code> — nothing is there.</figcaption>
+  </figure>
+</section>
+
+<!-- ===================== 1. ROUTING ===================== -->
+<section>
+  <h2><span class="num">01</span> Path routing</h2>
+  <p>
+    The proxy reads the URL and picks a backend. <code>/api/orders</code> goes to one Java
+    application, <code>/api/users</code> to a completely different one — and the browser cannot
+    tell, because both answers arrive from the same origin.
+  </p>
+  <p>
+    That single-origin property is worth more than it first looks. A front end served from
+    <code>/</code> can call <code>/api/...</code> with <strong>no CORS configuration at all</strong>,
+    because as far as the browser is concerned nothing crossed an origin boundary.
+  </p>
+
+  <figure>
+    <svg viewBox="0 0 780 238" role="img" aria-label="nginx matching URL prefixes to different upstreams">
+      <rect class="d-client" x="10" y="100" width="110" height="48" rx="8"/>
+      <text class="d-label" x="38" y="129">request</text>
+      <path class="d-line-accent" d="M124 124 H170" marker-end="url(#ar3)"/>
+
+      <rect class="d-proxy" x="174" y="72" width="180" height="104" rx="9"/>
+      <text class="d-label" x="194" y="102">nginx location {}</text>
+      <text class="d-sub" x="194" y="126">longest prefix wins,</text>
+      <text class="d-sub" x="194" y="144">not first match</text>
+
+      <path class="d-line" d="M358 110 H460 V53 H520" marker-end="url(#ar3)"/>
+      <path class="d-line" d="M358 124 H520" marker-end="url(#ar3)"/>
+      <path class="d-line" d="M358 138 H460 V193 H520" marker-end="url(#ar3)"/>
+
+      <rect class="d-backend" x="524" y="26" width="212" height="54" rx="8"/>
+      <text class="d-label" x="544" y="50">orders pool</text>
+      <text class="d-sub" x="544" y="69">/api/orders/*</text>
+
+      <rect class="d-backend" x="524" y="97" width="212" height="54" rx="8"/>
+      <text class="d-label" x="544" y="121">users-service</text>
+      <text class="d-sub" x="544" y="140">/api/users/*</text>
+
+      <rect class="d-box" x="524" y="166" width="212" height="54" rx="8"/>
+      <text class="d-label" x="544" y="190">everything else</text>
+      <text class="d-sub" x="544" y="209">404 &mdash; not routed</text>
+
+      <defs>
+        <marker id="ar3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+          <path d="M0 0 L10 5 L0 10 z" fill="var(--muted)"/>
+        </marker>
+      </defs>
+    </svg>
+    <figcaption>A route that is not declared does not exist. The proxy is an allowlist.</figcaption>
+  </figure>
+
+  <span class="filename">nginx/nginx.conf</span>
+  <pre><code>location /api/orders { proxy_pass http://orders_backend; }
+location /api/users  { proxy_pass http://users_backend;  }</code></pre>
+
+  <div class="demo">
+    <div class="demo-head">
+      <span class="demo-title">Two paths, two applications</span>
+      <button onclick="demoRouting(this)">Call both</button>
+    </div>
+    <p class="muted" style="font-size:13.5px;margin:0">
+      Watch <code>servedBy</code>: different values mean different Java processes answered.
+    </p>
+    <div class="out" id="out-routing"></div>
+  </div>
+</section>
+
+<!-- ===================== 2. LOAD BALANCING ===================== -->
+<section>
+  <h2><span class="num">02</span> Load balancing</h2>
+  <p>
+    Two containers run the <em>identical</em> orders image. nginx keeps them in a named pool
+    and hands each arriving request to the next one in turn. Scaling out becomes a config line
+    rather than an architecture project.
+  </p>
+
+  <figure>
+    <svg viewBox="0 0 860 220" role="img" aria-label="Round robin distribution across two identical replicas">
+      <rect class="d-client" x="10" y="84" width="104" height="48" rx="8"/>
+      <text class="d-label" x="30" y="113">6 requests</text>
+      <path class="d-line-accent" d="M118 108 H176" marker-end="url(#ar4)"/>
+      <rect class="d-proxy" x="180" y="72" width="170" height="72" rx="9"/>
+      <text class="d-label" x="200" y="100">upstream pool</text>
+      <text class="d-sub" x="200" y="120">round-robin (default)</text>
+
+      <path class="d-line" d="M354 92 L470 56" marker-end="url(#ar4)"/>
+      <text class="d-sub" x="372" y="58">1, 3, 5</text>
+      <path class="d-line" d="M354 124 L470 166" marker-end="url(#ar4)"/>
+      <text class="d-sub" x="372" y="170">2, 4, 6</text>
+
+      <rect class="d-backend" x="474" y="30" width="180" height="52" rx="8"/>
+      <text class="d-label" x="496" y="52">orders-a</text>
+      <text class="d-sub" x="496" y="70">3 requests</text>
+      <rect class="d-backend" x="474" y="140" width="180" height="52" rx="8"/>
+      <text class="d-label" x="496" y="162">orders-b</text>
+      <text class="d-sub" x="496" y="180">3 requests</text>
+
+      <text class="d-tag" x="690" y="66">OTHER POLICIES</text>
+      <text class="d-sub" x="690" y="90">least_conn</text>
+      <text class="d-sub" x="690" y="110">ip_hash (sticky)</text>
+      <text class="d-sub" x="690" y="130">weight=3</text>
+      <defs>
+        <marker id="ar4" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+          <path d="M0 0 L10 5 L0 10 z" fill="var(--muted)"/>
+        </marker>
+      </defs>
+    </svg>
+  </figure>
+
+  <span class="filename">nginx/nginx.conf</span>
+  <pre><code>upstream orders_backend {
+    server orders-a:8080 max_fails=1 fail_timeout=10s;
+    server orders-b:8080 max_fails=1 fail_timeout=10s;
+    keepalive 16;
+}</code></pre>
+
+  <div class="demo">
+    <div class="demo-head">
+      <span class="demo-title">Six requests to one URL</span>
+      <button onclick="demoBalance(this)">Fire 6</button>
+    </div>
+    <p class="muted" style="font-size:13.5px;margin:0">Same URL every time. The answers alternate.</p>
+    <div class="chips" id="chips-balance"></div>
+    <div class="out" id="out-balance"></div>
+  </div>
+</section>
+
+<!-- ===================== 3. FORWARDED HEADERS ===================== -->
+<section>
+  <h2><span class="num">03</span> Forwarded headers</h2>
+  <p>
+    Put a proxy in front of an app and the app immediately starts lying. The TCP connection it
+    sees comes from nginx, so <code>getRemoteAddr()</code> returns nginx. The <code>Host</code>
+    and scheme are nginx's too, so every redirect and generated link points at an internal
+    address. Log an IP for rate limiting and you log the proxy, every time.
+  </p>
+  <p>
+    The fix is a handshake between the two halves. nginx attaches what the app can no longer
+    see; Spring Boot's <code>ForwardedHeaderFilter</code> reads those headers back and rewrites
+    the request before your controller runs. One line of YAML:
+    <code>server.forward-headers-strategy: framework</code>.
+  </p>
+
+  <figure>
+    <svg viewBox="0 0 860 260" role="img" aria-label="Information lost at the proxy and restored by forwarded headers">
+      <rect class="d-client" x="10" y="96" width="126" height="64" rx="8"/>
+      <text class="d-label" x="30" y="122">real client</text>
+      <text class="d-sub" x="30" y="142">203.0.113.9</text>
+      <text class="d-sub" x="30" y="158">https, :8443</text>
+
+      <path class="d-line-accent" d="M140 128 H206" marker-end="url(#ar5)"/>
+      <rect class="d-proxy" x="210" y="88" width="150" height="80" rx="9"/>
+      <text class="d-label" x="232" y="116">nginx</text>
+      <text class="d-sub" x="232" y="136">new TCP connection</text>
+      <text class="d-sub" x="232" y="154">starts here</text>
+
+      <path class="d-line" d="M364 128 H466" marker-end="url(#ar5)"/>
+
+      <rect class="d-danger" x="470" y="26" width="380" height="88" rx="9"/>
+      <text class="d-tag" x="490" y="48">WITHOUT THE HEADERS — WHAT THE APP BELIEVES</text>
+      <text class="d-sub" x="490" y="70">remoteAddr = 172.x.x.x  (that is nginx)</text>
+      <text class="d-sub" x="490" y="88">requestURL = http://localhost/...  (port + scheme lost)</text>
+      <text class="d-sub" x="490" y="104">isSecure = false</text>
+
+      <rect class="d-backend" x="470" y="142" width="380" height="102" rx="9"/>
+      <text class="d-tag" x="490" y="164">WITH THE HEADERS + ForwardedHeaderFilter</text>
+      <text class="d-sub" x="490" y="186">X-Forwarded-For: 203.0.113.9   -&gt; remoteAddr</text>
+      <text class="d-sub" x="490" y="204">X-Forwarded-Proto: https       -&gt; scheme</text>
+      <text class="d-sub" x="490" y="222">X-Forwarded-Host/Port          -&gt; requestURL</text>
+      <text class="d-sub" x="490" y="238">isSecure = true</text>
+      <defs>
+        <marker id="ar5" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+          <path d="M0 0 L10 5 L0 10 z" fill="var(--muted)"/>
+        </marker>
+      </defs>
+    </svg>
+    <figcaption>The two services are configured on opposite sides of this line, on purpose.</figcaption>
+  </figure>
+
+  <div class="cols">
+    <div>
+      <span class="filename">nginx.conf — nginx hands it forward</span>
+      <pre><code>proxy_set_header X-Real-IP         $remote_addr;
+proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+proxy_set_header X-Forwarded-Proto $scheme;
+proxy_set_header X-Forwarded-Host  $host;
+proxy_set_header X-Forwarded-Port  $server_port;</code></pre>
+    </div>
+    <div>
+      <span class="filename">application.yml — Spring picks it up</span>
+      <pre><code># users-service: corrected view
+server:
+  forward-headers-strategy: framework
+
+# orders-service: raw view, for contrast
+server:
+  forward-headers-strategy: none</code></pre>
+    </div>
+  </div>
+
+  <div class="demo">
+    <div class="demo-head">
+      <span class="demo-title">The same request, seen two ways</span>
+      <button onclick="demoWhoami(this)">Compare both services</button>
+    </div>
+    <p class="muted" style="font-size:13.5px;margin:0">
+      Load this page over <a href="https://localhost:8443/" id="httpsLink">https://localhost:8443</a>
+      and run it again — <code>requestURL</code> follows the client, not the backend.
+    </p>
+    <div class="out" id="out-whoami"></div>
+  </div>
+
+  <div class="note">
+    <strong>Trust boundary.</strong> These headers are just headers — a client can forge them.
+    They are safe to believe only because nginx <em>overwrites</em> them at the edge. Never trust
+    <code>X-Forwarded-For</code> on a server that is reachable directly.
+  </div>
+</section>
+
+<!-- ===================== 4. TLS ===================== -->
+<section>
+  <h2><span class="num">04</span> TLS termination</h2>
+  <p>
+    The proxy owns the certificate, does the handshake, and forwards plain HTTP over the private
+    network. Three Java applications and not one of them has a keystore, a cipher list, or a
+    renewal cron job. Certificates live in exactly one place.
+  </p>
+
+  <figure>
+    <svg viewBox="0 0 860 190" role="img" aria-label="Encrypted outside, plain HTTP inside the private network">
+      <rect class="d-client" x="10" y="66" width="120" height="56" rx="8"/>
+      <text class="d-label" x="42" y="98">browser</text>
+      <path class="d-line-accent" d="M134 94 H244" stroke-width="3" marker-end="url(#ar6)"/>
+      <text class="d-sub" x="150" y="76">https</text>
+      <text class="d-sub" x="150" y="92">encrypted</text>
+      <text class="d-sub" x="150" y="122">public net</text>
+
+      <rect class="d-proxy" x="248" y="52" width="180" height="84" rx="9"/>
+      <text class="d-label" x="268" y="80">nginx</text>
+      <text class="d-sub" x="268" y="100">holds demo.crt + key</text>
+      <text class="d-sub" x="268" y="118">TLS ends here</text>
+
+      <path class="d-dash" d="M432 94 H560" marker-end="url(#ar6)"/>
+      <text class="d-sub" x="448" y="76">http</text>
+      <text class="d-sub" x="448" y="92">plain text</text>
+      <text class="d-sub" x="448" y="122">private net</text>
+
+      <rect class="d-backend" x="564" y="52" width="286" height="84" rx="9"/>
+      <text class="d-label" x="588" y="80">Spring Boot containers</text>
+      <text class="d-sub" x="588" y="102">no keystore, no cert config,</text>
+      <text class="d-sub" x="588" y="120">no renewal — they never see TLS</text>
+      <defs>
+        <marker id="ar6" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+          <path d="M0 0 L10 5 L0 10 z" fill="var(--muted)"/>
+        </marker>
+      </defs>
+    </svg>
+  </figure>
+
+  <span class="filename">nginx/nginx.conf — both listeners, one server block</span>
+  <pre><code>listen 8080;
+listen 8443 ssl;
+ssl_certificate     /etc/nginx/certs/demo.crt;
+ssl_certificate_key /etc/nginx/certs/demo.key;
+ssl_protocols       TLSv1.2 TLSv1.3;</code></pre>
+
+  <p class="muted">
+    The certificate is self-signed and generated at startup, so your browser will warn once.
+    In production you would also redirect HTTP to HTTPS; that line is commented out in the config
+    so this walkthrough keeps working on both ports.
+  </p>
+
+  <div class="demo">
+    <div class="demo-head">
+      <span class="demo-title">Which scheme are you on?</span>
+      <button onclick="demoTls(this)">Check</button>
+    </div>
+    <div class="out" id="out-tls"></div>
+  </div>
+</section>
+
+<!-- ===================== 5. CACHING ===================== -->
+<section>
+  <h2><span class="num">05</span> Caching</h2>
+  <p>
+    <code>/api/users/slow</code> sleeps for two seconds to imitate an expensive report. nginx is
+    told to keep the reply for thirty seconds, so the second caller gets it instantly — and the
+    JVM is never woken. Watch <code>docker compose logs -f users-service</code>: the second call
+    logs nothing, because it never arrived.
+  </p>
+
+  <figure>
+    <svg viewBox="0 0 860 250" role="img" aria-label="Cache miss goes to the app, cache hit is served by nginx">
+      <text class="d-tag" x="12" y="20">FIRST CALL — MISS</text>
+      <rect class="d-client" x="10" y="32" width="96" height="44" rx="8"/>
+      <text class="d-label" x="38" y="59">client</text>
+      <path class="d-line" d="M110 54 H186" marker-end="url(#ar7)"/>
+      <rect class="d-proxy" x="190" y="32" width="150" height="44" rx="8"/>
+      <text class="d-label" x="228" y="59">nginx</text>
+      <path class="d-line" d="M344 54 H440" marker-end="url(#ar7)"/>
+      <rect class="d-backend" x="444" y="32" width="176" height="44" rx="8"/>
+      <text class="d-label" x="468" y="59">users-service</text>
+      <text class="d-sub" x="636" y="50">2000 ms of real work</text>
+      <text class="d-sub" x="636" y="68">X-Cache-Status: MISS</text>
+      <path class="d-dash" d="M265 80 V112 H265"/>
+      <text class="d-sub" x="278" y="104">copy stored on disk</text>
+
+      <text class="d-tag" x="12" y="152">SECOND CALL — HIT</text>
+      <rect class="d-client" x="10" y="164" width="96" height="44" rx="8"/>
+      <text class="d-label" x="38" y="191">client</text>
+      <path class="d-line-accent" d="M110 186 H186" marker-end="url(#ar7a)"/>
+      <rect class="d-proxy" x="190" y="164" width="150" height="44" rx="8"/>
+      <text class="d-label" x="228" y="191">nginx</text>
+      <path class="d-line-accent" d="M186 200 H110" marker-end="url(#ar7a)"/>
+      <path class="d-dash" d="M344 186 H440"/>
+      <text class="d-sub" x="352" y="176">never called</text>
+      <rect class="d-box" x="444" y="164" width="176" height="44" rx="8" opacity=".45"/>
+      <text class="d-label" x="468" y="191" opacity=".45">users-service</text>
+      <text class="d-sub" x="636" y="182">~2 ms</text>
+      <text class="d-sub" x="636" y="200">X-Cache-Status: HIT</text>
+      <defs>
+        <marker id="ar7" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+          <path d="M0 0 L10 5 L0 10 z" fill="var(--muted)"/>
+        </marker>
+        <marker id="ar7a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+          <path d="M0 0 L10 5 L0 10 z" fill="var(--accent)"/>
+        </marker>
+      </defs>
+    </svg>
+  </figure>
+
+  <span class="filename">nginx/nginx.conf</span>
+  <pre><code>proxy_cache users_cache;
+proxy_cache_valid 200 30s;
+proxy_cache_lock on;          # one request refills; the rest wait, no stampede
+proxy_cache_use_stale error timeout updating http_500 http_502 http_503 http_504;
+add_header X-Cache-Status $upstream_cache_status always;</code></pre>
+
+  <p>
+    <code>proxy_cache_use_stale</code> is the quiet hero there: if the backend falls over, nginx
+    keeps serving the last good copy instead of an error page.
+  </p>
+
+  <div class="demo">
+    <div class="demo-head">
+      <span class="demo-title">Two calls to a two-second endpoint</span>
+      <button onclick="demoCache(this)">Run</button>
+    </div>
+    <p class="muted" style="font-size:13.5px;margin:0">
+      Both calls use a one-off cache key, so the first is always a real MISS (~2s) and the
+      second a HIT (instant).
+    </p>
+    <div class="out" id="out-cache"></div>
+  </div>
+</section>
+
+<!-- ===================== 6. RATE LIMITING ===================== -->
+<section>
+  <h2><span class="num">06</span> Rate limiting</h2>
+  <p>
+    <code>/api/orders/limited</code> is capped at five requests per second per client IP, with a
+    burst of five. Fire twenty at once and roughly six get through; the rest are rejected
+    <em>by nginx</em>. The Java thread pool never hears about them, which is the entire point
+    when you are being hammered.
+  </p>
+
+  <figure>
+    <svg viewBox="0 0 860 220" role="img" aria-label="A leaky bucket admitting some requests and rejecting the rest">
+      <rect class="d-client" x="10" y="80" width="110" height="56" rx="8"/>
+      <text class="d-label" x="28" y="106">20 requests</text>
+      <text class="d-sub" x="28" y="124">all at once</text>
+      <path class="d-line" d="M124 108 H186" marker-end="url(#ar8)"/>
+
+      <rect class="d-proxy" x="190" y="50" width="196" height="118" rx="9"/>
+      <text class="d-label" x="212" y="78">limit_req zone</text>
+      <text class="d-sub" x="212" y="100">rate = 5 r/s</text>
+      <text class="d-sub" x="212" y="118">burst = 5, nodelay</text>
+      <text class="d-sub" x="212" y="140">key = client IP</text>
+      <text class="d-sub" x="212" y="158">(4-byte binary form)</text>
+
+      <path class="d-line" d="M390 84 H520" marker-end="url(#ar8)"/>
+      <text class="d-sub" x="404" y="76">~6 admitted</text>
+      <rect class="d-backend" x="524" y="62" width="200" height="44" rx="8"/>
+      <text class="d-label" x="548" y="89">orders pool &middot; 200 OK</text>
+
+      <path class="d-line" d="M390 134 H520" marker-end="url(#ar8)"/>
+      <text class="d-sub" x="404" y="156">~14 rejected here</text>
+      <rect class="d-danger" x="524" y="112" width="200" height="44" rx="8"/>
+      <text class="d-label" x="548" y="139">503 &middot; app never touched</text>
+      <defs>
+        <marker id="ar8" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+          <path d="M0 0 L10 5 L0 10 z" fill="var(--muted)"/>
+        </marker>
+      </defs>
+    </svg>
+  </figure>
+
+  <span class="filename">nginx/nginx.conf</span>
+  <pre><code>limit_req_zone $binary_remote_addr zone=orders_limit:10m rate=5r/s;
+
+location /api/orders/limited {
+    limit_req zone=orders_limit burst=5 nodelay;
+    limit_req_status 503;
+    proxy_pass http://orders_backend;
+}</code></pre>
+
+  <div class="demo">
+    <div class="demo-head">
+      <span class="demo-title">Twenty simultaneous requests</span>
+      <button onclick="demoRateLimit(this)">Hammer it</button>
+    </div>
+    <div class="chips" id="chips-rate"></div>
+    <div class="out" id="out-rate"></div>
+  </div>
+</section>
+
+<!-- ===================== 7. FAILOVER ===================== -->
+<section>
+  <h2><span class="num">07</span> Health checks and failover</h2>
+  <p>
+    A backend that errors is pulled out of rotation for ten seconds, and the request that
+    exposed it is quietly retried on a healthy sibling. The client sees one clean response and
+    never learns a server died. Ten seconds later nginx tries the sick one again, so recovery
+    needs no intervention either.
+  </p>
+  <p>
+    Compose plays its part at startup: nginx will not boot until all three
+    <code>/actuator/health</code> checks pass, so you never get a 502 from simply racing the JVM.
+  </p>
+
+  <figure>
+    <svg viewBox="0 0 860 210" role="img" aria-label="Traffic draining away from a failed replica onto a healthy one">
+      <rect class="d-client" x="10" y="82" width="96" height="46" rx="8"/>
+      <text class="d-label" x="34" y="110">client</text>
+      <path class="d-line-accent" d="M110 105 H176" marker-end="url(#ar9)"/>
+      <rect class="d-proxy" x="180" y="66" width="170" height="78" rx="9"/>
+      <text class="d-label" x="200" y="94">nginx</text>
+      <text class="d-sub" x="200" y="114">max_fails=1</text>
+      <text class="d-sub" x="200" y="132">fail_timeout=10s</text>
+
+      <path class="d-line-accent" d="M354 86 L474 52" marker-end="url(#ar9a)"/>
+      <text class="d-sub" x="378" y="52">100% of traffic</text>
+      <rect class="d-backend" x="478" y="28" width="190" height="48" rx="8"/>
+      <text class="d-label" x="500" y="50">orders-a</text>
+      <text class="d-sub" x="500" y="67">healthy</text>
+
+      <path class="d-dash" d="M354 122 L474 156"/>
+      <text class="d-sub" x="366" y="160">marked down</text>
+      <rect class="d-danger" x="478" y="132" width="190" height="48" rx="8"/>
+      <text class="d-label" x="500" y="154">orders-b</text>
+      <text class="d-sub" x="500" y="171">stopped</text>
+
+      <text class="d-sub" x="688" y="52">no errors reach</text>
+      <text class="d-sub" x="688" y="70">the client</text>
+      <text class="d-sub" x="688" y="156">retried after 10s</text>
+      <defs>
+        <marker id="ar9" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+          <path d="M0 0 L10 5 L0 10 z" fill="var(--accent)"/>
+        </marker>
+        <marker id="ar9a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+          <path d="M0 0 L10 5 L0 10 z" fill="var(--accent)"/>
+        </marker>
+      </defs>
+    </svg>
+  </figure>
+
+  <span class="filename">Try it for real — in a terminal</span>
+  <pre><code>docker compose stop orders-b      # kill one replica
+# now press the button below: every answer says orders-a, zero errors
+docker compose start orders-b     # bring it back
+# nginx re-tries a downed peer after fail_timeout (10s), so give it
+# ~10s past the container going healthy, then press again: alternating returns</code></pre>
+
+  <div class="demo">
+    <div class="demo-head">
+      <span class="demo-title">Eight requests — who is alive?</span>
+      <button onclick="demoFailover(this)">Fire 8</button>
+    </div>
+    <div class="chips" id="chips-failover"></div>
+    <div class="out" id="out-failover"></div>
+  </div>
+</section>
+
+<!-- ===================== RECAP ===================== -->
+<section>
+  <h2>Why bother, in one table</h2>
+  <table>
+    <thead><tr><th>Concern</th><th>Without a proxy</th><th>With one</th></tr></thead>
+    <tbody>
+      <tr><td>Public surface</td><td>Every app exposes a port</td><td>One door; backends unreachable</td></tr>
+      <tr><td>Scaling out</td><td>Clients must learn new addresses</td><td>Add a line to <code>upstream</code></td></tr>
+      <tr><td>TLS</td><td>Certificate in every app</td><td>One certificate, one renewal</td></tr>
+      <tr><td>A dead instance</td><td>Users see errors</td><td>Retried elsewhere, silently</td></tr>
+      <tr><td>Expensive endpoints</td><td>Every call hits the JVM</td><td>Cached at the edge</td></tr>
+      <tr><td>Abuse</td><td>Your thread pool absorbs it</td><td>Rejected before Java runs</td></tr>
+      <tr><td>Front end calling APIs</td><td>CORS configuration</td><td>Same origin, nothing to configure</td></tr>
+      <tr><td>Client IP / scheme</td><td>Correct by default</td><td>Needs forwarded headers — the one cost</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Where to read next</h3>
+  <ul>
+    <li><code>nginx/nginx.conf</code> — the lesson itself, commented directive by directive.</li>
+    <li><code>docker-compose.yml</code> — note which containers publish ports, and which do not.</li>
+    <li><code>*/src/main/resources/application.yml</code> — the one Spring setting that matters.</li>
+    <li><code>README.md</code> — the same seven steps as curl commands.</li>
+  </ul>
+</section>
+
+<footer>
+  Served to you by nginx, off its own disk, without touching Java.
+  Stop everything with <code>docker compose down</code>.
+</footer>
+
+</div>
+
+<script>
+document.getElementById('origin').textContent = location.origin;
+
+const $ = id => document.getElementById(id);
+
+function busy(btn, on) { btn.disabled = on; }
+
+async function timedFetch(path) {
+  const t0 = performance.now();
+  const res = await fetch(path, { cache: 'no-store' });
+  const ms = Math.round(performance.now() - t0);
+  // Read the body ONCE as text, then try to parse it. Calling res.json() and then
+  // res.text() on a failure would throw: the stream is already consumed. This matters
+  // here because nginx's 503 rate-limit page is HTML, not JSON.
+  const raw = await res.text();
+  let body;
+  try { body = JSON.parse(raw); } catch { body = raw; }
+  return {
+    status: res.status,
+    ms,
+    cache: res.headers.get('X-Cache-Status'),
+    upstream: res.headers.get('X-Upstream-Server'),
+    body
+  };
+}
+
+const j = o => JSON.stringify(o, null, 2);
+
+// ---- 01 routing ----
+async function demoRouting(btn) {
+  busy(btn, true);
+  const out = $('out-routing');
+  out.textContent = 'calling /api/orders and /api/users ...';
+  try {
+    const [o, u] = await Promise.all([timedFetch('/api/orders'), timedFetch('/api/users')]);
+    out.textContent =
+      'GET /api/orders  -> ' + o.status + '  upstream=' + (o.upstream || 'n/a') + '  servedBy=' + o.body.servedBy + '\n' +
+      'GET /api/users   -> ' + u.status + '  upstream=' + (u.upstream || 'n/a') + '  servedBy=' + u.body.servedBy + '\n\n' +
+      'Two different upstream addresses, two different applications,\n' +
+      'one origin (' + location.origin + ') as far as this page is concerned.\n\n' +
+      '--- /api/users body ---\n' + j(u.body);
+  } catch (e) { out.textContent = 'Request failed: ' + e; }
+  busy(btn, false);
+}
+
+// ---- 02 load balancing ----
+async function demoBalance(btn) {
+  busy(btn, true);
+  const chips = $('chips-balance'), out = $('out-balance');
+  chips.innerHTML = ''; out.textContent = '';
+  const seen = {};
+  const lines = [];
+  for (let i = 1; i <= 6; i++) {
+    const r = await timedFetch('/api/orders');
+    const who = r.body.servedBy;
+    seen[who] = (seen[who] || 0) + 1;
+    const chip = document.createElement('span');
+    chip.className = 'chip ' + (who === 'orders-a' ? 'a' : 'b');
+    chip.textContent = '#' + i + ' ' + who;
+    chips.appendChild(chip);
+    lines.push('request ' + i + ': servedBy=' + who + '  upstream=' + (r.upstream || 'n/a') +
+               '  hitsOnThisReplica=' + r.body.hitsOnThisReplica);
+  }
+  out.textContent = lines.join('\n') + '\n\ntotals: ' + j(seen) +
+    '\n\nhitsOnThisReplica is a counter inside each JVM. Two independent\n' +
+    'counters means two independent processes answered.';
+  busy(btn, false);
+}
+
+// ---- 03 forwarded headers ----
+async function demoWhoami(btn) {
+  busy(btn, true);
+  const out = $('out-whoami');
+  out.textContent = 'asking both services who they think you are ...';
+  try {
+    const [o, u] = await Promise.all([
+      timedFetch('/api/orders/whoami'),
+      timedFetch('/api/users/whoami')
+    ]);
+    out.textContent =
+      '=== orders-service : forward-headers-strategy = none ===\n' + j(o.body) +
+      '\n\n=== users-service : forward-headers-strategy = framework ===\n' + j(u.body) +
+      '\n\nCompare the two requestURL values. Same request, two beliefs.';
+  } catch (e) { out.textContent = 'Request failed: ' + e; }
+  busy(btn, false);
+}
+
+// ---- 04 tls ----
+async function demoTls(btn) {
+  busy(btn, true);
+  const out = $('out-tls');
+  const secure = location.protocol === 'https:';
+  const r = await timedFetch('/api/users/whoami');
+  out.textContent =
+    'This page was loaded over : ' + location.protocol.replace(':', '') + '\n' +
+    'nginx listener            : ' + (secure ? '8443 (TLS terminated here)' : '8080 (plain)') + '\n' +
+    'What the Java app reports : scheme=' + r.body.whatTheBackendSees.scheme +
+    ', isSecure=' + r.body.whatTheBackendSees.isSecure + '\n' +
+    '                            requestURL=' + r.body.whatTheBackendSees.requestURL + '\n\n' +
+    (secure
+      ? 'You are on HTTPS. nginx decrypted your request and forwarded plain HTTP\n' +
+        'to Spring Boot - yet the app still reports https, because X-Forwarded-Proto\n' +
+        'told it so. That is how redirects and generated links stay correct.'
+      : 'You are on plain HTTP. Open https://localhost:8443/ (accept the self-signed\n' +
+        'certificate warning) and press this again to see the difference.');
+  busy(btn, false);
+}
+
+// ---- 05 caching ----
+async function demoCache(btn) {
+  busy(btn, true);
+  const out = $('out-cache');
+  // A unique query string means a cache key nginx has never seen, so call 1 is
+  // guaranteed to be a genuine MISS. Without this the demo is at the mercy of
+  // whatever is left in the cache from a previous run.
+  const url = '/api/users/slow?demo=' + Date.now();
+  out.textContent = 'call 1 of 2 - cold cache key, so this takes about two seconds ...';
+  const first = await timedFetch(url);
+  out.textContent = 'call 1: ' + first.ms + ' ms   X-Cache-Status: ' + (first.cache || 'n/a') +
+                    '\ncall 2 of 2 ...';
+  const second = await timedFetch(url);
+  const speedup = second.ms > 0 ? Math.round(first.ms / second.ms) : 'a lot';
+  out.textContent =
+    'call 1: ' + String(first.ms).padStart(5) + ' ms   X-Cache-Status: ' + (first.cache || 'n/a') + '\n' +
+    'call 2: ' + String(second.ms).padStart(5) + ' ms   X-Cache-Status: ' + (second.cache || 'n/a') + '\n\n' +
+    'About ' + speedup + 'x faster, and the second call never reached Java.\n' +
+    'Both bodies report computeMillis=' + first.body.computeMillis + ', because the second\n' +
+    'response is literally the first one replayed off disk.\n\n' +
+    'A third status exists: STALE. If you call the plain /api/users/slow after its\n' +
+    '30s window expires, nginx hands you the old copy instantly and refreshes it in\n' +
+    'the background - that is proxy_cache_use_stale earning its keep.\n\n' +
+    '--- body ---\n' + j(second.body);
+  busy(btn, false);
+}
+
+// ---- 06 rate limiting ----
+async function demoRateLimit(btn) {
+  busy(btn, true);
+  const chips = $('chips-rate'), out = $('out-rate');
+  chips.innerHTML = ''; out.textContent = 'firing 20 requests simultaneously ...';
+  const jobs = [];
+  for (let i = 0; i < 20; i++) jobs.push(timedFetch('/api/orders/limited').catch(e => ({ status: 'ERR', body: String(e) })));
+  const results = await Promise.all(jobs);
+  let ok = 0, blocked = 0;
+  results.forEach((r, i) => {
+    const chip = document.createElement('span');
+    const pass = r.status === 200;
+    pass ? ok++ : blocked++;
+    chip.className = 'chip ' + (pass ? 'a' : 'bad');
+    chip.textContent = '#' + (i + 1) + ' ' + r.status;
+    chips.appendChild(chip);
+  });
+  out.textContent =
+    'admitted : ' + ok + '\n' +
+    'rejected : ' + blocked + '  (503, generated by nginx)\n\n' +
+    'Policy is 5 r/s with a burst of 5, so about six get through in one instant.\n' +
+    'The ' + blocked + ' rejected requests never became Java threads, never opened a\n' +
+    'database connection, never did anything. They were refused at the door.\n\n' +
+    'Wait a second and press again - the bucket refills at 5 per second.';
+  busy(btn, false);
+}
+
+// ---- 07 failover ----
+async function demoFailover(btn) {
+  busy(btn, true);
+  const chips = $('chips-failover'), out = $('out-failover');
+  chips.innerHTML = ''; out.textContent = '';
+  const seen = {};
+  let errors = 0;
+  for (let i = 1; i <= 8; i++) {
+    try {
+      const r = await timedFetch('/api/orders');
+      const who = r.body.servedBy;
+      seen[who] = (seen[who] || 0) + 1;
+      const chip = document.createElement('span');
+      chip.className = 'chip ' + (who === 'orders-a' ? 'a' : 'b');
+      chip.textContent = who;
+      chips.appendChild(chip);
+    } catch (e) {
+      errors++;
+      const chip = document.createElement('span');
+      chip.className = 'chip bad';
+      chip.textContent = 'error';
+      chips.appendChild(chip);
+    }
+  }
+  const alive = Object.keys(seen);
+  out.textContent =
+    'distribution : ' + j(seen) + '\n' +
+    'client errors: ' + errors + '\n\n' +
+    (alive.length === 1
+      ? 'Only ' + alive[0] + ' answered, and you still got ' + (8 - errors) + ' clean responses.\n' +
+        'Either the other replica is stopped, or nginx has it marked down.\n' +
+        'Note what did NOT happen: nobody saw a 502.'
+      : 'Both replicas answered. Run "docker compose stop orders-b" in a terminal\n' +
+        'and press the button again - the split collapses onto orders-a with no errors.');
+  busy(btn, false);
+}
+</script>
+</body>
+</html>

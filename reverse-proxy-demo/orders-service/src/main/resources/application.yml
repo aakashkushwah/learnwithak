@@ -1,0 +1,28 @@
+server:
+  port: 8080
+  # OFF on purpose. This service shows you the raw, unprocessed view so you can see
+  # what a backend sees when nobody tells it that it sits behind a proxy.
+  # The users-service sets this to "framework" so you can compare. See README step 4.
+  forward-headers-strategy: none
+
+spring:
+  application:
+    name: orders-service
+
+# Injected per-container by docker-compose.yml so each replica can identify itself.
+instance:
+  name: ${INSTANCE_NAME:orders-local}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+  endpoint:
+    health:
+      probes:
+        enabled: true
+
+logging:
+  pattern:
+    console: "%d{HH:mm:ss.SSS} [${instance.name:-?}] %-5level %logger{20} - %msg%n"

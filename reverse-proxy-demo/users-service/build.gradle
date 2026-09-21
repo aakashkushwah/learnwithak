@@ -1,0 +1,33 @@
+plugins {
+    id 'java'
+    // Brings in bootJar (builds the runnable fat jar) and sensible Spring defaults.
+    id 'org.springframework.boot' version '3.3.5'
+    // Applies Spring Boot's dependency BOM, which is why the starters below
+    // need no version numbers - Boot pins a consistent set for you.
+    id 'io.spring.dependency-management' version '1.1.6'
+}
+
+group = 'com.example'
+version = '1.0.0'
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+}
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    implementation 'org.springframework.boot:spring-boot-starter-web'
+    // Gives us /actuator/health, which docker-compose uses as the healthcheck so
+    // nginx never starts routing to a backend that is not up yet.
+    implementation 'org.springframework.boot:spring-boot-starter-actuator'
+}
+
+// Fixed output name so the Dockerfile can COPY a predictable path.
+tasks.named('bootJar') {
+    archiveFileName = 'app.jar'
+}

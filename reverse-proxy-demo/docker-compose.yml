@@ -1,0 +1,133 @@
+# =============================================================================
+# One command brings up the whole thing:   docker compose up --build
+#
+# Topology:
+#
+#        your browser / curl
+#                |
+#     :8080 http |  :8443 https          <-- the ONLY published ports
+#                v
+#          +-----------+
+#          |   nginx   |  reverse proxy: routes, balances, caches, throttles, terminates TLS
+#          +-----------+
+#           /     |     \
+#          /      |      \                (private Docker network - no published ports)
+#   orders-a   orders-b   users-service
+#   :8080      :8080      :8080
+#
+# Notice that the three Spring Boot containers publish NOTHING. You cannot reach
+# them from your machine at all. Every request has to go through nginx. That is
+# not an accident of the demo - it is the security argument for a reverse proxy.
+# =============================================================================
+
+services:
+
+  # ---- Backend #1, replica A ------------------------------------------------
+  orders-a:
+    build: ./orders-service
+    container_name: rp-orders-a
+    environment:
+      INSTANCE_NAME: orders-a      # echoed in every response, so you can see who answered
+    networks: [backend]
+    # No "ports:" key. Deliberate. Compare with the nginx service below.
+    healthcheck:
+      # nginx waits for this to pass before it starts (see depends_on), so you never
+      # get a 502 from racing the JVM's startup.
+      test: ["CMD-SHELL", "wget -q -O - http://localhost:8080/actuator/health | grep -q UP"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 20s
+
+  # ---- Backend #1, replica B ------------------------------------------------
+  # Byte-for-byte the same image as orders-a. Only INSTANCE_NAME differs.
+  # Two replicas is what makes nginx's round-robin visible, and what lets you
+  # kill one and watch failover happen.
+  orders-b:
+    build: ./orders-service
+    container_name: rp-orders-b
+    environment:
+      INSTANCE_NAME: orders-b
+    networks: [backend]
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://localhost:8080/actuator/health | grep -q UP"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 20s
+
+  # ---- Backend #2 -----------------------------------------------------------
+  # A different application entirely. nginx routes to it by URL path.
+  users-service:
+    build: ./users-service
+    container_name: rp-users
+    environment:
+      INSTANCE_NAME: users-1
+    networks: [backend]
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://localhost:8080/actuator/health | grep -q UP"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 20s
+
+  # ---- One-shot: make a self-signed certificate -----------------------------
+  # Runs, writes a cert into a shared volume, exits. nginx waits for it to finish
+  # successfully. Keeps a private key out of the source tree and means there is no
+  # manual openssl step before you can try the HTTPS half of the demo.
+  cert-init:
+    image: alpine/openssl:latest
+    container_name: rp-cert-init
+    command:
+      - req
+      - -x509
+      - -nodes
+      - -newkey
+      - rsa:2048
+      - -days
+      - "365"
+      - -keyout
+      - /certs/demo.key
+      - -out
+      - /certs/demo.crt
+      - -subj
+      - /CN=localhost
+      - -addext
+      - subjectAltName=DNS:localhost,IP:127.0.0.1
+    volumes:
+      - certs:/certs
+
+  # ---- The reverse proxy ----------------------------------------------------
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: rp-nginx
+    ports:
+      # host:container. These two lines are the entire public surface of the system.
+      - "8080:8080"   # http  -> http://localhost:8080
+      - "8443:8443"   # https -> https://localhost:8443 (self-signed, expect a warning)
+    volumes:
+      # The annotated config - this file is the actual lesson. Read it.
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      # The explainer page, served by nginx straight off disk without touching Java.
+      - ./nginx/html:/usr/share/nginx/html:ro
+      # The cert produced by cert-init above.
+      - certs:/etc/nginx/certs:ro
+    networks: [backend]
+    depends_on:
+      orders-a:
+        condition: service_healthy
+      orders-b:
+        condition: service_healthy
+      users-service:
+        condition: service_healthy
+      cert-init:
+        condition: service_completed_successfully
+
+networks:
+  # A private bridge network. Containers resolve each other by service name -
+  # which is why nginx.conf can say "server orders-a:8080" and it simply works.
+  backend:
+    driver: bridge
+
+volumes:
+  certs:

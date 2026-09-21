@@ -1,0 +1,28 @@
+server:
+  port: 8080
+  # ON here. Installs Spring's ForwardedHeaderFilter, which rewrites each request from
+  # the X-Forwarded-* headers so the app sees the client's real scheme, host, port and IP.
+  # This is the setting you almost always want in production behind a proxy.
+  # Compare with orders-service, which leaves it off. See README step 4.
+  forward-headers-strategy: framework
+
+spring:
+  application:
+    name: users-service
+
+instance:
+  name: ${INSTANCE_NAME:users-local}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+  endpoint:
+    health:
+      probes:
+        enabled: true
+
+logging:
+  pattern:
+    console: "%d{HH:mm:ss.SSS} [${instance.name:-?}] %-5level %logger{20} - %msg%n"
